@@ -9,6 +9,9 @@ import System.IO (stdin, hGetEcho, Handle)
 import System.Console.Haskeline.Backend.Win32 as Win32
 #else
 import System.Console.Haskeline.Backend.Posix as Posix
+#ifdef ANSI_BACKEND
+import System.Console.Haskeline.Backend.ANSI as ANSI
+#endif
 #ifdef TERMINFO
 import System.Console.Haskeline.Backend.Terminfo as Terminfo
 #endif
@@ -41,9 +44,17 @@ directTTY = ttyHandles >>= runDraw
 #ifndef MINGW
 runDraw :: Handles -> MaybeT IO RunTerm
 #ifndef TERMINFO
+#ifndef ANSI_BACKEND
 runDraw = runDumbTerm
 #else
+runDraw = runANSIDraw h `mplus` runDumbTerm h
+#endif
+#else
+#ifndef ANSI_BACKEND
 runDraw h = runTerminfoDraw h `mplus` runDumbTerm h
+#else
+runDraw h = runTerminfoDraw h `mplus` runANSIDraw h `mplus` runDumbTerm h
+#endif
 #endif
 #endif
 
