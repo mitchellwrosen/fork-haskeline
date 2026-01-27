@@ -14,8 +14,8 @@ import Data.List(foldl')
 import System.IO
 import qualified Control.Exception as Exception
 import Data.Maybe (fromMaybe, mapMaybe)
-import qualified Data.IntMap as Map
 
+import System.Console.Haskeline.Backend.ANSILike hiding (Draw)
 import System.Console.Haskeline.Monads as Monads
 import System.Console.Haskeline.LineState
 import System.Console.Haskeline.Term
@@ -28,18 +28,7 @@ import qualified Control.Monad.Trans.Writer as Writer
 ----------------------------------------------------------------
 -- Low-level terminal output
 
--- | Keep track of all of the output capabilities we can use.
--- 
--- We'll be frequently using the (automatic) 'Monoid' instance for 
--- @Actions -> TermOutput@.
-data Actions = Actions {leftA, rightA, upA :: Int -> TermOutput,
-                        clearToLineEnd :: TermOutput,
-                        nl, cr :: TermOutput,
-                        bellAudible,bellVisual :: TermOutput,
-                        clearAllA :: LinesAffected -> TermOutput,
-                        wrapLine :: TermOutput}
-
-getActions :: Capability Actions
+getActions :: Capability (Actions TermOutput)
 getActions = do
     -- This capability is not strictly necessary, but is very widely supported
     -- and assuming it makes for a much simpler implementation of printText.
@@ -73,48 +62,20 @@ getWrapLine left1 = (do
 ----------------------------------------------------------------
 -- The Draw monad
 
--- denote in modular arithmetic;
--- in particular, 0 <= termCol < width
-data TermPos = TermPos {termRow,termCol :: !Int}
-    deriving Show
-
-initTermPos :: TermPos
-initTermPos = TermPos {termRow = 0, termCol = 0}
-
-data TermRows = TermRows {
-                    rowLengths :: !(Map.IntMap Int),
-                    -- ^ The length of each nonempty row
-                    lastRow :: !Int
-                    -- ^ The last nonempty row, or zero if the entire line
-                    -- is empty.  Note that when the cursor wraps to the first
-                    -- column of the next line, termRow > lastRow.
-                         }
-    deriving Show
-
-initTermRows :: TermRows
-initTermRows = TermRows {rowLengths = Map.empty, lastRow=0}
-
-setRow :: Int -> Int -> TermRows -> TermRows
-setRow r len rs = TermRows {rowLengths = Map.insert r len (rowLengths rs),
-                            lastRow=r}
-
-lookupCells :: TermRows -> Int -> Int
-lookupCells (TermRows rc _) r = Map.findWithDefault 0 r rc
-
-newtype Draw m a = Draw {unDraw :: (ReaderT Actions
+newtype Draw m a = Draw {unDraw :: (ReaderT (Actions TermOutput)
                                     (ReaderT Terminal
                                     (StateT TermRows
                                     (StateT TermPos
                                     (PosixT m))))) a}
     deriving (Functor, Applicative, Monad, MonadIO,
               MonadMask, MonadThrow, MonadCatch,
-              MonadReader Actions, MonadReader Terminal, MonadState TermPos,
+              MonadReader (Actions TermOutput), MonadReader Terminal, MonadState TermPos,
               MonadState TermRows, MonadReader Handles)
 
 instance MonadTrans Draw where
     lift = Draw . lift . lift . lift . lift . lift
 
-evalDraw :: forall m . (MonadReader Layout m, CommandMonad m) => Terminal -> Actions -> EvalTerm (PosixT m)
+evalDraw :: forall m . (MonadReader Layout m, CommandMonad m) => Terminal -> Actions TermOutput -> EvalTerm (PosixT m)
 evalDraw term actions = EvalTerm eval liftE
   where
     liftE = Draw . lift . lift . lift . lift
@@ -122,8 +83,8 @@ evalDraw term actions = EvalTerm eval liftE
                             . evalStateT' initTermRows
                             . runReaderT' term
                             . runReaderT' actions
-                            . unDraw 
- 
+                            . unDraw
+
 
 runTerminfoDraw :: Handles -> MaybeT IO RunTerm
 runTerminfoDraw h = do
@@ -171,7 +132,7 @@ terminfoKeys term = mapMaybe getSequence keyCapabilities
                 ,(keyEnter,      simpleKey $ KeyChar '\n')
                 ]
 
-    
+
 
 ----------------------------------------------------------------
 -- Terminal output actions
@@ -181,13 +142,9 @@ terminfoKeys term = mapMaybe getSequence keyCapabilities
 -- This prevents flicker, i.e., the cursor appearing briefly
 -- in an intermediate position.
 
-type TermAction = Actions -> TermOutput
+type ActionM a = forall m . (MonadReader Layout m, MonadIO m) => ActionT TermOutput (Draw m) a
 
-type ActionT = Writer.WriterT TermAction
-
-type ActionM a = forall m . (MonadReader Layout m, MonadIO m) => ActionT (Draw m) a
-
-runActionT :: MonadIO m => ActionT (Draw m) a -> Draw m a
+runActionT :: MonadIO m => ActionT TermOutput (Draw m) a -> Draw m a
 runActionT m = do
     (x,action) <- Writer.runWriterT m
     toutput <- asks action
@@ -196,7 +153,7 @@ runActionT m = do
     liftIO $ hRunTermOutput ttyh term toutput
     return x
 
-output :: TermAction -> ActionM ()
+output :: TermAction TermOutput -> ActionM ()
 output t = Writer.tell t  -- NB: explicit argument enables build with ghc-6.12.3
                           -- (Probably related to the monomorphism restriction;
                           -- see GHC ticket #1749).
@@ -204,12 +161,12 @@ output t = Writer.tell t  -- NB: explicit argument enables build with ghc-6.12.3
 outputText :: String -> ActionM ()
 outputText s = output (const (termText s))
 
-left,right,up :: Int -> TermAction
+left,right,up :: Int -> TermAction TermOutput
 left = flip leftA
 right = flip rightA
 up = flip upA
 
-clearAll :: LinesAffected -> TermAction
+clearAll :: LinesAffected -> TermAction TermOutput
 clearAll = flip clearAllA
 
 mreplicate :: Monoid m => Int -> m -> m
@@ -218,13 +175,13 @@ mreplicate n m
     | otherwise = m `mappend` mreplicate (n-1) m
 
 -- We don't need to bother encoding the spaces.
-spaces :: Int -> TermAction
+spaces :: Int -> TermAction TermOutput
 spaces 0 = mempty
 spaces 1 = const $ termText " " -- share when possible
 spaces n = const $ termText $ replicate n ' '
 
 
-changePos :: TermPos -> TermPos -> TermAction
+changePos :: TermPos -> TermPos -> TermAction TermOutput
 changePos TermPos {termRow=r1, termCol=c1} TermPos {termRow=r2, termCol=c2}
     | r1 == r2 = if c1 < c2 then right (c2-c1) else left (c1-c2)
     | r1 > r2 = cr <#> up (r1-r2) <#> right c2
@@ -354,7 +311,7 @@ repositionT _ s = do
 instance (MonadIO m, MonadMask m, MonadReader Layout m) => Term (Draw m) where
     drawLineDiff xs ys = runActionT $ drawLineDiffT xs ys
     reposition layout lc = runActionT $ repositionT layout lc
-    
+
     printLines = mapM_ $ \line -> runActionT $ do
                                     outputText line
                                     output nl
