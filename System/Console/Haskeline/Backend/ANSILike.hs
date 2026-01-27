@@ -30,16 +30,16 @@ import System.IO
 --
 -- We'll be frequently using the (automatic) 'Monoid' instance for
 -- @Actions -> TermOutput@.
-data Actions = Actions
-  { leftA, rightA, upA :: Int -> TermOutput,
-    clearToLineEnd :: TermOutput,
-    nl, cr :: TermOutput,
-    bellAudible, bellVisual :: TermOutput,
-    clearAllA :: LinesAffected -> TermOutput,
-    wrapLine :: TermOutput
+data Actions a = Actions
+  { leftA, rightA, upA :: Int -> a,
+    clearToLineEnd :: a,
+    nl, cr :: a,
+    bellAudible, bellVisual :: a,
+    clearAllA :: LinesAffected -> a,
+    wrapLine :: a
   }
 
-getActions :: Capability Actions
+getActions :: Capability (Actions TermOutput)
 getActions = do
   -- This capability is not strictly necessary, but is very widely supported
   -- and assuming it makes for a much simpler implementation of printText.
@@ -117,7 +117,7 @@ lookupCells (TermRows rc _) r = Map.findWithDefault 0 r rc
 newtype Draw m a = Draw
   { unDraw ::
       ( ReaderT
-          Actions
+          (Actions TermOutput)
           ( ReaderT
               Terminal
               ( StateT
@@ -139,7 +139,7 @@ newtype Draw m a = Draw
       MonadMask,
       MonadThrow,
       MonadCatch,
-      MonadReader Actions,
+      MonadReader (Actions TermOutput),
       MonadReader Terminal,
       MonadState TermPos,
       MonadState TermRows,
@@ -149,7 +149,7 @@ newtype Draw m a = Draw
 instance MonadTrans Draw where
   lift = Draw . lift . lift . lift . lift . lift
 
-evalDraw :: forall m. (MonadReader Layout m, CommandMonad m) => Terminal -> Actions -> EvalTerm (PosixT m)
+evalDraw :: forall m. (MonadReader Layout m, CommandMonad m) => Terminal -> Actions TermOutput -> EvalTerm (PosixT m)
 evalDraw term actions = EvalTerm eval liftE
   where
     liftE = Draw . lift . lift . lift . lift
@@ -221,7 +221,7 @@ terminfoKeys term = mapMaybe getSequence keyCapabilities
 -- This prevents flicker, i.e., the cursor appearing briefly
 -- in an intermediate position.
 
-type TermAction = Actions -> TermOutput
+type TermAction = Actions TermOutput -> TermOutput
 
 type ActionT = Writer.WriterT TermAction
 
