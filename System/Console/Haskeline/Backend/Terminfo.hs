@@ -49,7 +49,8 @@ getActions = do
                 clearToLineEnd = clearToLineEnd', nl = nl',cr = cr',
                 bellAudible = bellAudible', bellVisual = bellVisual',
                 clearAllA = clearAll',
-                 wrapLine = wrapLine'}
+                 wrapLine = wrapLine',
+                 textA = termText}
 
 -- If the wraparound glitch is in effect, force a wrap by printing a space.
 -- Otherwise, it'll wrap automatically.
