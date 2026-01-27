@@ -3,15 +3,18 @@
 #endif
 module System.Console.Haskeline.Backend.ANSILike
   ( Actions (..),
-    Draw (),
+    Draw,
+    runDraw,
+    liftPosixT,
     TermPos (..),
-    initTermPos,
     TermRows (..),
-    initTermRows,
-    setRow,
-    lookupCells,
     TermAction,
-    ActionT,
+    output,
+    outputText,
+    drawLineDiffT,
+    clearLayoutT,
+    moveToNextLineT,
+    repositionT,
   )
 where
 
@@ -76,18 +79,7 @@ lookupCells :: TermRows -> Int -> Int
 lookupCells (TermRows rc _) r = Map.findWithDefault 0 r rc
 
 newtype Draw c m a = Draw
-  { unDraw ::
-      ReaderT
-        (Actions c)
-        ( StateT
-            TermRows
-            ( StateT
-                TermPos
-                (PosixT m)
-            )
-        )
-        a
-  }
+  {unDraw :: ReaderT (Actions c) (StateT TermRows (StateT TermPos (PosixT m))) a}
   deriving
     ( Functor,
       Applicative,
@@ -103,18 +95,18 @@ newtype Draw c m a = Draw
     )
 
 instance MonadTrans (Draw c) where
-  lift = Draw . lift . lift . lift . lift
+  lift = liftPosixT . lift
 
--- evalDraw :: forall m. (MonadReader Layout m, CommandMonad m) => Terminal -> Actions TermOutput -> EvalTerm (PosixT m)
--- evalDraw term actions = EvalTerm eval liftE
---   where
---     liftE = Draw . lift . lift . lift . lift
---     eval =
---       evalStateT' initTermPos
---         . evalStateT' initTermRows
---         . runReaderT' term
---         . runReaderT' actions
---         . unDraw
+runDraw :: (Monad m) => Actions c -> Draw c m a -> PosixT m a
+runDraw actions =
+  evalStateT' initTermPos
+    . evalStateT' initTermRows
+    . runReaderT' actions
+    . unDraw
+
+liftPosixT :: (Monad m) => PosixT m a -> Draw c m a
+liftPosixT =
+  Draw . lift . lift . lift
 
 ----------------------------------------------------------------
 -- Terminal output actions
@@ -126,25 +118,14 @@ instance MonadTrans (Draw c) where
 
 type TermAction a = Actions a -> a
 
-type ActionT a = Writer.WriterT (TermAction a)
+output :: (Monad m) => TermAction c -> WriterT (TermAction c) (Draw c m) ()
+output t = Writer.tell t
 
-type ActionM c a = forall m. (MonadReader Layout m, MonadIO m) => ActionT c (Draw c m) a
-
--- runActionT :: (MonadIO m) => ActionT TermOutput (Draw TermOutput m) a -> Draw TermOutput m a
--- runActionT m = do
---   (x, action) <- Writer.runWriterT m
---   toutput <- asks action
---   term <- ask
---   ttyh <- liftM ehOut ask
---   liftIO $ hRunTermOutput ttyh term toutput
---   return x
-
-output :: TermAction c -> ActionM c ()
-output t = Writer.tell t -- NB: explicit argument enables build with ghc-6.12.3
+-- NB: explicit argument enables build with ghc-6.12.3
 -- (Probably related to the monomorphism restriction;
 -- see GHC ticket #1749).
 
-outputText :: String -> ActionM c ()
+outputText :: (Monad m) => String -> WriterT (TermAction c) (Draw c m) ()
 outputText s = output (text s)
 
 left, right, up :: Int -> TermAction a
@@ -175,19 +156,19 @@ changePos TermPos {termRow = r1, termCol = c1} TermPos {termRow = r2, termCol = 
   | r1 > r2 = cr <#> up (r1 - r2) <#> right c2
   | otherwise = cr <#> mreplicate (r2 - r1) nl <#> right c2
 
-moveToPos :: (Monoid c) => TermPos -> ActionM c ()
+moveToPos :: (Monoid c, Monad m) => TermPos -> WriterT (TermAction c) (Draw c m) ()
 moveToPos p = do
   oldP <- get
   put p
   output $ changePos oldP p
 
-moveRelative :: (Monoid c) => Int -> ActionM c ()
+moveRelative :: (Monoid c, MonadReader Layout m) => Int -> WriterT (TermAction c) (Draw c m) ()
 moveRelative n =
   liftM3 (advancePos n) ask get get
     >>= \p -> moveToPos p
 
 -- Note that these move by a certain number of cells, not graphemes.
-changeRight, changeLeft :: (Monoid c) => Int -> ActionM c ()
+changeRight, changeLeft :: (Monoid c, MonadReader Layout m) => Int -> WriterT (TermAction c) (Draw c m) ()
 changeRight n
   | n <= 0 = return ()
   | otherwise = moveRelative n
@@ -225,7 +206,7 @@ sum' = foldl' (+) 0
 ----------------------------------------------------------------
 -- Text printing actions
 
-printText :: (Monoid c) => [Grapheme] -> ActionM c ()
+printText :: (Monoid c, MonadReader Layout m) => [Grapheme] -> WriterT (TermAction c) (Draw c m) ()
 printText [] = return ()
 printText gs = do
   -- First, get the monadic parameters:
@@ -249,7 +230,7 @@ printText gs = do
 ----------------------------------------------------------------
 -- High-level Term implementation
 
-drawLineDiffT :: (Monoid c) => LineChars -> LineChars -> ActionM c ()
+drawLineDiffT :: (Monoid c, MonadReader Layout m) => LineChars -> LineChars -> WriterT (TermAction c) (Draw c m) ()
 drawLineDiffT (xs1, ys1) (xs2, ys2) = case matchInit xs1 xs2 of
   ([], []) | ys1 == ys2 -> return ()
   (xs1', []) | xs1' ++ ys1 == ys2 -> changeLeft (gsWidth xs1')
@@ -264,13 +245,13 @@ drawLineDiffT (xs1, ys1) (xs2, ys2) = case matchInit xs1 xs2 of
     moveToPos p
 
 -- The number of nonempty lines after the current row position.
-getLinesLeft :: (Monoid c) => ActionM c Int
+getLinesLeft :: (Monoid c, Monad m) => WriterT (TermAction c) (Draw c m) Int
 getLinesLeft = do
   p <- get
   rc <- get
   return $ max 0 (lastRow rc - termRow p)
 
-clearDeadText :: (Monoid c) => TermRows -> ActionM c ()
+clearDeadText :: (Monoid c, Monad m) => TermRows -> WriterT (TermAction c) (Draw c m) ()
 clearDeadText oldRS = do
   TermPos {termRow = r, termCol = c} <- get
   let extraRows = lastRow oldRS - r
@@ -283,20 +264,20 @@ clearDeadText oldRS = do
         put TermPos {termRow = r + extraRows, termCol = 0}
       output $ clearToLineEnd <#> mreplicate extraRows (nl <#> clearToLineEnd)
 
-clearLayoutT :: (Monoid c) => ActionM c ()
+clearLayoutT :: (Monoid c, MonadReader Layout m) => WriterT (TermAction c) (Draw c m) ()
 clearLayoutT = do
   h <- asks height
   output (clearAll h)
   put initTermPos
 
-moveToNextLineT :: (Monoid c) => ActionM c ()
+moveToNextLineT :: (Monoid c, Monad m) => WriterT (TermAction c) (Draw c m) ()
 moveToNextLineT = do
   lleft <- getLinesLeft
   output $ mreplicate (lleft + 1) nl
   put initTermPos
   put initTermRows
 
-repositionT :: (Monoid c) => Layout -> LineChars -> ActionM c ()
+repositionT :: (Monoid c, MonadReader Layout m) => Layout -> LineChars -> WriterT (TermAction c) (Draw c m) ()
 repositionT _ s = do
   oldPos <- get
   l <- getLinesLeft
@@ -307,15 +288,3 @@ repositionT _ s = do
   put initTermPos
   put initTermRows
   drawLineDiffT ([], []) s
-
--- instance (MonadIO m, MonadMask m, MonadReader Layout m) => Term (Draw TermOutput m) where
---   drawLineDiff xs ys = runActionT $ drawLineDiffT xs ys
---   reposition layout lc = runActionT $ repositionT layout lc
-
---   printLines = mapM_ $ \line -> runActionT $ do
---     outputText line
---     output nl
---   clearLayout = runActionT clearLayoutT
---   moveToNextLine _ = runActionT moveToNextLineT
---   ringBell True = runActionT $ output bellAudible
---   ringBell False = runActionT $ output bellVisual
