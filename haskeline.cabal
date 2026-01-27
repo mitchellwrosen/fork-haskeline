@@ -41,6 +41,11 @@ source-repository head
     type: git
     location: https://github.com/judah/haskeline.git
 
+flag ansi
+    Description: Assume an ANSI-compatible terminal.
+    Default: True
+    Manual: True
+
 -- There are three main advantages to the terminfo backend over the portable,
 -- "dumb" alternative.  First, it enables more efficient control sequences
 -- when redrawing the input.  Second, and more importantly, it enables us
@@ -126,6 +131,9 @@ Library
                 System.Console.Haskeline.Backend.Posix
                 System.Console.Haskeline.Backend.Posix.Encoder
                 System.Console.Haskeline.Backend.DumbTerm
+        if flag(ansi) || flag(terminfo) {
+            Other-modules: System.Console.Haskeline.Backend.ANSILike
+        }
         if flag(terminfo) {
             Build-depends: terminfo>=0.3.1.3 && <0.5
             Other-modules: System.Console.Haskeline.Backend.Terminfo
