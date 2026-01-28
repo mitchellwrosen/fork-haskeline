@@ -15,6 +15,8 @@ module System.Console.Haskeline.Backend.ANSILike
     clearLayoutT,
     moveToNextLineT,
     repositionT,
+    printLinesT,
+    ringBellT,
   )
 where
 
@@ -288,3 +290,13 @@ repositionT _ s = do
   put initTermPos
   put initTermRows
   drawLineDiffT ([], []) s
+
+printLinesT :: (Monoid c, Monad m) => [String] -> WriterT (TermAction c) (Draw c m) ()
+printLinesT =
+  mapM_ $ \line -> do
+    outputText line
+    output nl
+
+ringBellT :: (Monad m) => Bool -> WriterT (TermAction c) (Draw c m) ()
+ringBellT True = output bellAudible
+ringBellT False = output bellVisual

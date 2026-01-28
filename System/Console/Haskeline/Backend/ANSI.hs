@@ -100,10 +100,7 @@ runActionT m = do
 instance (MonadIO m, MonadMask m, MonadReader Layout m) => Term (Draw m) where
   drawLineDiff xs ys = runActionT $ drawLineDiffT xs ys
   reposition layout lc = runActionT $ repositionT layout lc
-  printLines = mapM_ $ \line -> runActionT $ do
-    outputText line
-    output nl
+  printLines xs = runActionT $ printLinesT xs
   clearLayout = runActionT clearLayoutT
   moveToNextLine _ = runActionT moveToNextLineT
-  ringBell True = runActionT $ output bellAudible
-  ringBell False = runActionT $ output bellVisual
+  ringBell x = runActionT $ ringBellT x
