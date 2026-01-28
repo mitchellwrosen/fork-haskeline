@@ -14,8 +14,7 @@ import System.IO
 import qualified Control.Exception as Exception
 import Data.Maybe (fromMaybe, mapMaybe)
 
-import System.Console.Haskeline.Backend.ANSILike hiding (Draw)
-import qualified System.Console.Haskeline.Backend.ANSILike as ANSILike
+import System.Console.Haskeline.Backend.ANSILike
 import System.Console.Haskeline.Monads as Monads
 import System.Console.Haskeline.Term
 import System.Console.Haskeline.Backend.Posix
@@ -61,7 +60,7 @@ getWrapLine left1 = (do
 ----------------------------------------------------------------
 -- The Draw monad
 
-newtype Draw m a = Draw {unDraw :: ReaderT Terminal (ANSILike.Draw TermOutput m) a}
+newtype Draw m a = Draw {unDraw :: ReaderT Terminal (ANSILike TermOutput m) a}
     deriving (Functor, Applicative, Monad, MonadIO,
               MonadMask, MonadThrow, MonadCatch,
               MonadReader (Actions TermOutput), MonadReader Terminal, MonadState TermPos,
@@ -70,7 +69,7 @@ newtype Draw m a = Draw {unDraw :: ReaderT Terminal (ANSILike.Draw TermOutput m)
 instance MonadTrans Draw where
     lift = liftANSILike . lift
 
-liftANSILike :: Monad m => ANSILike.Draw TermOutput m a -> Draw m a
+liftANSILike :: Monad m => ANSILike TermOutput m a -> Draw m a
 liftANSILike =
   Draw . lift
 
@@ -78,7 +77,7 @@ evalDraw :: forall m . (MonadReader Layout m, CommandMonad m) => Terminal -> Act
 evalDraw term actions = EvalTerm eval liftE
   where
     liftE = liftANSILike . liftPosixT
-    eval = runDraw actions . runReaderT' term . unDraw
+    eval = runANSILike actions . runReaderT' term . unDraw
 
 
 runTerminfoDraw :: Handles -> MaybeT IO RunTerm
@@ -129,7 +128,7 @@ terminfoKeys term = mapMaybe getSequence keyCapabilities
 
 
 
-runActionT :: MonadIO m => Writer.WriterT (TermAction TermOutput) (ANSILike.Draw TermOutput m) a -> Draw m a
+runActionT :: MonadIO m => Writer.WriterT (TermAction TermOutput) (ANSILike TermOutput m) a -> Draw m a
 runActionT m = do
     (x,action) <- liftANSILike (Writer.runWriterT m)
     toutput <- asks action

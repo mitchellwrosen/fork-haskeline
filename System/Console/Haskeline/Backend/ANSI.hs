@@ -6,8 +6,7 @@ where
 import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
 import qualified Control.Monad.Trans.Writer as Writer
 import Data.String (IsString (..))
-import System.Console.Haskeline.Backend.ANSILike hiding (Draw)
-import qualified System.Console.Haskeline.Backend.ANSILike as ANSILike
+import System.Console.Haskeline.Backend.ANSILike
 import System.Console.Haskeline.Backend.Posix (Handles, PosixT, ehOut, posixLayouts, posixRunTerm)
 import System.Console.Haskeline.Monads
 import System.Console.Haskeline.Term (CommandMonad, EvalTerm (..), Layout, RunTerm, Term (..))
@@ -57,7 +56,7 @@ actions =
     }
 
 newtype Draw m a
-  = Draw {unDraw :: ANSILike.Draw StringBuilder m a}
+  = Draw {unDraw :: ANSILike StringBuilder m a}
   deriving
     ( Applicative,
       Functor,
@@ -75,7 +74,7 @@ evalDraw :: forall m. (MonadReader Layout m, CommandMonad m) => EvalTerm (PosixT
 evalDraw = EvalTerm eval liftE
   where
     liftE = Draw . liftPosixT
-    eval = runDraw actions . unDraw
+    eval = runANSILike actions . unDraw
 
 runANSIDraw :: Handles -> MaybeT IO RunTerm
 runANSIDraw handles =
@@ -87,7 +86,7 @@ runANSIDraw handles =
       id
       evalDraw
 
-runActionT :: (MonadIO m) => Writer.WriterT (TermAction StringBuilder) (ANSILike.Draw StringBuilder m) a -> Draw m a
+runActionT :: (MonadIO m) => Writer.WriterT (TermAction StringBuilder) (ANSILike StringBuilder m) a -> Draw m a
 runActionT m = do
   (x, action) <- Draw (Writer.runWriterT m)
   toutput <- asks action
