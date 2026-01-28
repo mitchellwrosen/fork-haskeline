@@ -31,14 +31,13 @@ import System.Console.Haskeline.Backend.WCWidth
 import System.Console.Haskeline.LineState
 import System.Console.Haskeline.Monads as Monads
 import System.Console.Haskeline.Term
-import System.Console.Terminfo
 
 data Actions a = Actions
   { leftA, rightA, upA :: Int -> a,
     clearToLineEnd :: a,
     nl, cr :: a,
     bellAudible, bellVisual :: a,
-    clearAllA :: LinesAffected -> a,
+    clearAllA :: Int -> a,
     wrapLine :: a,
     textA :: String -> a
   }
@@ -132,7 +131,7 @@ up = flip upA
 text :: String -> TermAction a
 text = flip textA
 
-clearAll :: LinesAffected -> TermAction a
+clearAll :: Int -> TermAction a
 clearAll = flip clearAllA
 
 mreplicate :: (Monoid m) => Int -> m -> m
@@ -149,8 +148,8 @@ spaces n = text $ replicate n ' '
 changePos :: (Monoid a) => TermPos -> TermPos -> TermAction a
 changePos TermPos {termRow = r1, termCol = c1} TermPos {termRow = r2, termCol = c2}
   | r1 == r2 = if c1 < c2 then right (c2 - c1) else left (c1 - c2)
-  | r1 > r2 = cr <#> up (r1 - r2) <#> right c2
-  | otherwise = cr <#> mreplicate (r2 - r1) nl <#> right c2
+  | r1 > r2 = cr <> up (r1 - r2) <> right c2
+  | otherwise = cr <> mreplicate (r2 - r1) nl <> right c2
 
 moveToPos :: (Monoid c, Monad m) => TermPos -> WriterT (TermAction c) (ANSILike c m) ()
 moveToPos p = do
@@ -258,7 +257,7 @@ clearDeadText oldRS = do
       modify $ setRow r c
       when (extraRows /= 0) $
         put TermPos {termRow = r + extraRows, termCol = 0}
-      output $ clearToLineEnd <#> mreplicate extraRows (nl <#> clearToLineEnd)
+      output $ clearToLineEnd <> mreplicate extraRows (nl <> clearToLineEnd)
 
 clearLayoutT :: (Monoid c, MonadReader Layout m) => WriterT (TermAction c) (ANSILike c m) ()
 clearLayoutT = do
@@ -279,8 +278,8 @@ repositionT _ s = do
   l <- getLinesLeft
   output $
     cr
-      <#> mreplicate l nl
-      <#> mreplicate (l + termRow oldPos) (clearToLineEnd <#> up 1)
+      <> mreplicate l nl
+      <> mreplicate (l + termRow oldPos) (clearToLineEnd <> up 1)
   put initTermPos
   put initTermRows
   drawLineDiffT ([], []) s
