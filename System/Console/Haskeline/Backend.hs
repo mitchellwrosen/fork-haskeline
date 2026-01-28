@@ -47,7 +47,7 @@ runDraw :: Handles -> MaybeT IO RunTerm
 #ifndef ANSI_BACKEND
 runDraw = runDumbTerm
 #else
-runDraw = runANSIDraw h `mplus` runDumbTerm h
+runDraw h = runANSIDraw h `mplus` runDumbTerm h
 #endif
 #else
 #ifndef ANSI_BACKEND
